@@ -11,10 +11,15 @@ use actix_files::Files;
 mod math;
 mod logic;
 mod ui;
+use std::env;
+
 
 #[actix_web::main]  // This macro bootstraps the async main function using Tokio, similar to how Python's if __name__ == '__main__' runs the app.
 async fn main() -> std::io::Result<()> {  // Returns a std::io::Result to handle binding/listening errors.
-    println!("Server running at http://localhost:8000");
+    let port: u16 = env::var("PORT")
+    .unwrap_or("8080".to_string())
+    .parse()
+    .expect("PORT must be a number");
     HttpServer::new(|| {  // Creates a new server factory closure that configures the app per worker thread.
         App::new()  // Initializes a new Actix App instance.
             .service(  // Registers the /simulate route group.
@@ -28,7 +33,7 @@ async fn main() -> std::io::Result<()> {  // Returns a std::io::Result to handle
             
         
     })
-    .bind(("127.0.0.1", 8000))?  // Binds the server to localhost port 8000; ? propagates IO errors. Matches reference's default port.
+    .bind(("0.0.0.0", port))?  // Binds the server to localhost port 8080; ? propagates IO errors. Matches reference's default port.
     .run()  // Starts the server and blocks until shutdown.
     .await  // Awaits the server's future, handling graceful shutdown.
 }
