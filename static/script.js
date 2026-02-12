@@ -1,211 +1,305 @@
-// static/script.js
-// This script generalizes the reference's script.js for n-pendulums. Adds n input handling: on change/load, generates dynamic form rows for m_i, L_i, θ_i.
-// Collects params as comma-strings for backend. Animation: draws chain of rods (origin-pos1-pos2-...-posn), circles at each pos_k, red trace on end (last 100 frames).
-// Matches reference: square canvas resize, grid, loop animation (speed=1), play/pause/reset (rewind only), auto-play on run.
-// Assumptions: backend returns positions[t][2*k]=x_{k+1}, [2*k+1]=y; limit for scale; y-flip for canvas coords; trace on end effector.
-// No JS plot (backend PNG); fetch error alerts. Runs animate() loop always, gated by isPlaying/animData.
+// ==================== State & Config ====================
+const CONFIG = {
+    simDuration: 60.0,
+    traceLen: 100,
+    colors: ['#1f77b4', '#d62728', '#2ca02c', '#17becf', '#9467bd', '#e377c2', '#bcbd22']
+};
 
-let animData = null;  // Holds {positions: [...], n, limit} from backend.
-let isPlaying = false;  // Play state.
-let frameIdx = 0;  // Current frame.
-let animationId = null;  // RAF id.
-const speedMultiplier = 2;  // Frame skip, matches reference.
+let state = {
+    animData: null,
+    isPlaying: false,
+    frameIdx: 0,
+    animId: null,
+    playStartTime: 0
+};
 
-// DOM elements.
-const canvas = document.getElementById('anim-canvas');  // Canvas ref.
-const ctx = canvas.getContext('2d');  // 2D context.
-const imgTraj = document.getElementById('traj-img');  // Image ref.
-const btnRun = document.getElementById('btn-run');  // Run button.
-const btnPlay = document.getElementById('btn-playpause');  // Play button.
-const btnReset = document.getElementById('btn-reset');  // Reset.
-const nInput = document.getElementById('n');  // n input.
+// ==================== DOM Elements ====================
+const els = {
+    canvas: document.getElementById('anim-canvas'),
+    ctx: document.getElementById('anim-canvas').getContext('2d'),
+    graph: document.getElementById('graph-canvas'),
+    gctx: document.getElementById('graph-canvas').getContext('2d'),
+    inputs: {
+        n: document.getElementById('n'),
+        container: document.getElementById('params-fields')
+    },
+    btns: {
+        run: document.getElementById('btn-run'),
+        play: document.getElementById('btn-playpause'),
+        reset: document.getElementById('btn-reset')
+    },
+    loader: document.getElementById('loading-txt')
+};
 
-// Resize canvas square on load/resize.
-function resizeCanvas() {  // Matches reference.
-    const parent = canvas.parentElement;  // Parent width.
-    canvas.width = parent.clientWidth;  // Set width.
-    canvas.height = parent.clientWidth;  // Square.
-}
-window.addEventListener('resize', resizeCanvas);  // Listen.
-resizeCanvas();  // Initial.
+// ==================== Helpers ====================
 
-// Generate dynamic fields on n change.
-function generateFields() {  // Called on load/change.
-    const n = parseInt(nInput.value);  // Get n.
-    const container = document.getElementById('params-fields');  // Target div.
-    container.innerHTML = '';  // Clear.
-    for (let i = 1; i <= n; i++) {  // Loop 1 to n.
-        // Defaults: match reference for n=2, 0° for >2.
-        const mVal = 1.0;  // All m=1.
-        const lVal = 1.0;  // All L=1.
-        const thVal = (i === 1 ? 90 : i === 2 ? 45 : 0);  // θ defaults.
-        container.innerHTML += ` _____________________________________
-            <br><h4>Pendulum ${i} Parameters:</h4><br>
-            <div class="form-row">
-                <label>Mass ${i} (kg):</label>
-                <input type="number" id="m${i}" value="${mVal}" step="0.1">
-            </div>
-            <div class="form-row">
-                <label>Length ${i} (m):</label>
-                <input type="number" id="L${i}" value="${lVal}" step="0.1">
-            </div>
-            <div class="form-row">
-                <label>Initial θ${i} (deg):</label>
-                <input type="number" id="th${i}" value="${thVal}" step="1">
-            </div>
-        `;
-    }
-}
-nInput.addEventListener('change', generateFields);  // Listen for n change.
-generateFields();  // Initial generate.
+// Convert physics coordinates to canvas coordinates
+const getScreenPos = (x, y, scale, w, h) => ({
+    x: x * scale + (w / 2),
+    y: -y * scale + (h / 2)
+});
 
-// Draw single frame: generalized to n rods/masses.
-function drawFrame() {  // Matches reference structure.
-    if (!animData) return;  // Guard.
-    const w = canvas.width;  // Width.
-    const h = canvas.height;  // Height.
-    const limit = animData.limit;  // Scale base.
-    const scale = (w / 2) / limit;  // Pixels per unit.
-    const ox = w / 2;  // Origin x.
-    const oy = h / 2;  // Origin y.
-    ctx.clearRect(0, 0, w, h);  // Clear.
-    // Grid (horizontal/vertical lines at origin).
-    ctx.strokeStyle = '#eee';  // Light gray.
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, oy); ctx.lineTo(w, oy);  // Horz.
-    ctx.moveTo(ox, 0); ctx.lineTo(ox, h);  // Vert.
-    ctx.stroke();
-    const i = frameIdx;  // Current idx.
-    const positions = animData.positions[i];  // Current pos [x1,y1,x2,y2,...].
-    // Trace: last 100 frames of end effector (n-1).
-    const traceLen = 100;
-    const startTrace = Math.max(0, i - traceLen);
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';  // Red semi-trans.
-    ctx.lineWidth = 1;
-    for (let j = startTrace; j <= i; j++) {  // Loop trace frames.
-        const posJ = animData.positions[j];
-        const ex = posJ[2 * (animData.n - 1)] * scale + ox;  // End x.
-        const ey = -posJ[2 * (animData.n - 1) + 1] * scale + oy;  // End y (flip).
-        if (j === startTrace) ctx.moveTo(ex, ey);  // Start.
-        else ctx.lineTo(ex, ey);  // Line.
-    }
-    ctx.stroke();  // Draw trace.
-    // Rods: chain origin -> pos1 -> ... -> posn.
-    ctx.beginPath();
-    ctx.strokeStyle = 'black';  // Black.
-    ctx.lineWidth = 2;
-    let prevX = ox;  // Start at origin.
-    let prevY = oy;
-    ctx.moveTo(prevX, prevY);  // Move to origin.
-    for (let k = 0; k < animData.n; k++) {  // For each segment.
-        const x = positions[2 * k] * scale + ox;  // Pos x (0-based k=0 -> mass1).
-        const y = -positions[2 * k + 1] * scale + oy;  // Flip y.
-        ctx.lineTo(x, y);  // Line to pos.
-        prevX = x;  // Update prev for next (but not used).
-        prevY = y;
-    }
-    ctx.stroke();  // Draw chain.
-    // Origin pivot.
-    ctx.fillStyle = 'black';
-    ctx.beginPath();
-    ctx.arc(ox, oy, 3, 0, 2 * Math.PI);  // Small circle.
-    ctx.fill();
-    // Masses: circles at each pos_k.
-    for (let k = 0; k < animData.n; k++) {  // Loop masses.
-        const x = positions[2 * k] * scale + ox;
-        const y = -positions[2 * k + 1] * scale + oy;
+// Draws a graph-paper style grid (Major & Minor lines)
+const drawGrid = (ctx, w, h, scale, detailed = false) => {
+    ctx.save();
+    const ox = w / 2, oy = h / 2;
+    
+    // 1. Draw Background
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+
+    // 2. Draw Minor Grid (Light) - Every 0.1 units roughly
+    if (detailed && scale) {
+        ctx.strokeStyle = '#f0f0f0';
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, 2 * Math.PI);  // Radius 5.
-        ctx.fill();
+        const step = scale / 5; // density of grid
+        // Vertical & Horizontal loops combined logic could go here, 
+        // but simple loops are faster for grids
+        for (let x = ox % step; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+        for (let y = oy % step; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+        ctx.stroke();
     }
-}
 
-// Animation loop: RAF, advances if playing, loops.
-function animate() {  // Recursive RAF.
-    if (isPlaying && animData) {  // Guard.
-        frameIdx += speedMultiplier;  // Advance.
-        if (frameIdx >= animData.positions.length) {  // Loop.
-            frameIdx = 0;
-        }
-        drawFrame();  // Draw.
+    // 3. Draw Major Grid (Darker)
+    ctx.strokeStyle = detailed ? '#ccc' : '#eee';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    // Center Axes
+    ctx.moveTo(0, oy); ctx.lineTo(w, oy);
+    ctx.moveTo(ox, 0); ctx.lineTo(ox, h);
+    ctx.stroke();
+    
+    // Border
+    if (detailed) {
+        ctx.strokeStyle = '#000';
+        ctx.strokeRect(0, 0, w, h);
     }
-    animationId = requestAnimationFrame(animate);  // Next frame.
-}
+    ctx.restore();
+};
 
-// Run button: collect params, fetch /simulate.
-btnRun.addEventListener('click', () => {  // Click handler.
-    const n = parseInt(nInput.value);  // n.
-    let massesStr = '';  // Comma string.
-    let lengthsStr = '';
-    let anglesStr = '';
-    for (let i = 1; i <= n; i++) {  // Collect.
-        if (i > 1) {  // Comma after first.
-            massesStr += ',';
-            lengthsStr += ',';
-            anglesStr += ',';
-        }
-        massesStr += document.getElementById(`m${i}`).value;
-        lengthsStr += document.getElementById(`L${i}`).value;
-        anglesStr += document.getElementById(`th${i}`).value;
+// Gather inputs for N pendulums
+const getSimInputs = (n) => {
+    let m = [], l = [], th = [];
+    for (let i = 1; i <= n; i++) {
+        m.push(document.getElementById(`m${i}`).value);
+        l.push(document.getElementById(`L${i}`).value);
+        th.push(document.getElementById(`th${i}`).value);
     }
-    const payload = {  // JSON body.
-        n,
-        masses: massesStr,
-        lengths: lengthsStr,
-        initial_angles: anglesStr,
-        t_max: 60.0,  // Hardcode like reference.
-        n_points: 8000
+    return { 
+        n, 
+        masses: m.join(','), 
+        lengths: l.join(','), 
+        initial_angles: th.join(','), 
+        t_max: CONFIG.simDuration, 
+        n_points: 8000 
     };
-    document.getElementById('loading-txt').style.display = 'block';  // Show loading.
-    isPlaying = false;  // Stop current.
-    btnPlay.innerText = "Play";
-    fetch('/simulate', {  // POST.
+};
+
+// ==================== Core Functions ====================
+
+const resizeCanvases = () => {
+    const size = els.canvas.parentElement.clientWidth;
+    els.canvas.width = els.canvas.height = size;
+    els.graph.width = els.graph.height = size;
+    // Redraw static content if paused
+    if (!state.isPlaying && state.animData) {
+        drawFrame();
+        drawGraph();
+    }
+};
+
+const generateFields = () => {
+    const n = parseInt(els.inputs.n.value) || 2;
+    els.inputs.container.innerHTML = Array.from({ length: n }, (_, i) => {
+        const idx = i + 1;
+        // Default logic: 1st=90deg, 2nd=45deg, others=0
+        const thVal = idx === 1 ? 90 : idx === 2 ? 45 : 0;
+        return `
+            <div class="param-group">
+                <strong>Pendulum ${idx}</strong><br>
+                Mass (kg): <input type="number" step="0.01" id="m${idx}" value="1.0" required><br>
+                Length (m): <input type="number" step="0.01" id="L${idx}" value="1.0" required><br>
+                Initial θ (deg): <input type="number" step="1" id="th${idx}" value="${thVal}" required>
+            </div>`;
+    }).join('');
+};
+
+// ==================== Drawing ====================
+
+function drawFrame() {
+    if (!state.animData) return;
+    const { width: w, height: h } = els.canvas;
+    const scale = (w / 2) / state.animData.limit;
+
+    // Clear & Grid
+    els.ctx.clearRect(0, 0, w, h);
+    drawGrid(els.ctx, w, h, scale, false); // Simple grid for animation
+
+    const pos = state.animData.positions[state.frameIdx];
+
+    // 1. Trace (Red tail)
+    els.ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+    els.ctx.lineWidth = 2;
+    els.ctx.beginPath();
+    const startTrace = Math.max(0, state.frameIdx - CONFIG.traceLen);
+    const endIdx = (state.animData.n - 1) * 2; // Index for last pendulum x
+
+    for (let j = startTrace; j <= state.frameIdx; j++) {
+        const p = state.animData.positions[j];
+        const { x, y } = getScreenPos(p[endIdx], p[endIdx + 1], scale, w, h);
+        j === startTrace ? els.ctx.moveTo(x, y) : els.ctx.lineTo(x, y);
+    }
+    els.ctx.stroke();
+
+    // 2. Rods & Masses
+    els.ctx.lineWidth = 3;
+    els.ctx.strokeStyle = 'black';
+    els.ctx.beginPath();
+    els.ctx.moveTo(w / 2, h / 2); // Pivot
+
+    // Draw rods
+    for (let k = 0; k < state.animData.n; k++) {
+        const { x, y } = getScreenPos(pos[2 * k], pos[2 * k + 1], scale, w, h);
+        els.ctx.lineTo(x, y);
+    }
+    els.ctx.stroke();
+
+    // Draw pivot & masses
+    const drawCircle = (ctx, cx, cy, r, color) => {
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    };
+
+    drawCircle(els.ctx, w/2, h/2, 4, 'black'); // Pivot
+    for (let k = 0; k < state.animData.n; k++) {
+        const { x, y } = getScreenPos(pos[2 * k], pos[2 * k + 1], scale, w, h);
+        drawCircle(els.ctx, x, y, 6, '#333');
+    }
+}
+
+function drawGraph() {
+    if (!state.animData) return;
+    const { width: w, height: h } = els.graph;
+    const scale = (Math.min(w, h) / 2) / state.animData.limit;
+
+    // Draw detailed "Graph Paper" background
+    drawGrid(els.gctx, w, h, scale, true); 
+
+    // Draw Trajectories
+    els.gctx.lineWidth = 2.5;
+    els.gctx.lineJoin = els.gctx.lineCap = 'round';
+
+    for (let k = 0; k < state.animData.n; k++) {
+        els.gctx.strokeStyle = CONFIG.colors[k % CONFIG.colors.length];
+        els.gctx.beginPath();
+        let started = false;
+        
+        // Loop up to current frameIdx
+        for (let j = 0; j <= state.frameIdx; j++) {
+            const p = state.animData.positions[j];
+            const { x, y } = getScreenPos(p[2 * k], p[2 * k + 1], scale, w, h);
+            if (!started) { els.gctx.moveTo(x, y); started = true; }
+            else { els.gctx.lineTo(x, y); }
+        }
+        els.gctx.stroke();
+    }
+}
+
+// ==================== Animation Loop ====================
+
+const animate = () => {
+    if (state.isPlaying && state.animData) {
+        const elapsed = (Date.now() - state.playStartTime) / 1000;
+        const progress = (elapsed / CONFIG.simDuration) % 1;
+        state.frameIdx = Math.floor(progress * state.animData.positions.length);
+        
+        drawFrame();
+        drawGraph();
+    }
+    state.animId = requestAnimationFrame(animate);
+};
+
+// Enforce strict limits on the Input field
+const nInput = document.getElementById('n');
+
+nInput.addEventListener('input', () => {
+    let val = parseInt(nInput.value);
+    
+    // Force minimum 1
+    if (val < 1) {
+        nInput.value = 1;
+    } 
+    // Force maximum 150
+    else if (val > 150) {
+        nInput.value = 150;
+        //Alert the user or just silently clamp it
+        alert("Maximum pendulums limited to 150 for performance."); 
+    }
+    
+    // Regenerate the fields immediately
+    generateFields();
+});
+
+
+// ==================== Event Listeners ====================
+
+els.inputs.n.addEventListener('change', generateFields);
+window.addEventListener('resize', resizeCanvases);
+
+els.btns.run.addEventListener('click', () => {
+    const n = parseInt(els.inputs.n.value);
+    if (n > 20 && !confirm(`Simulating ${n} pendulums may be slow. Continue?`)) return;
+
+    // UI Updates
+    els.loader.style.display = 'block';
+    state.isPlaying = false;
+    els.btns.play.textContent = 'Play';
+
+    // Fetch
+    fetch('/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(getSimInputs(n))
     })
-    .then(async res => {
-        const text = await res.text();
-        if (!res.ok) throw new Error(text);
-        return JSON.parse(text);
-    }) // Parse JSON.
-    .then(data => {  // Handle.
-        document.getElementById('loading-txt').style.display = 'none';  // Hide.
-        if (data.success) {  // Success.
-            imgTraj.src = data.trajectory_image;  // Set image.
-            animData = data.animation_data;  // Set data.
-            frameIdx = 0;  // Reset.
-            isPlaying = true;  // Auto-play.
-            btnPlay.innerText = "Pause";
-            drawFrame();  // Initial draw.
-        } else {
-            alert("Error: " + data.error);  // Alert, like reference.
-        }
+    .then(res => res.ok ? res.json() : res.text().then(t => { throw new Error(t) }))
+    .then(data => {
+        if (!data.success) throw new Error(data.message || 'Unknown error');
+        
+        // Success
+        state.animData = data.animation_data;
+        state.frameIdx = 0;
+        state.isPlaying = true;
+        els.btns.play.textContent = 'Pause';
+        state.playStartTime = Date.now();
+        drawFrame();
+        drawGraph();
     })
-    .catch(err => {  // Error.
-        console.error(err);
-        document.getElementById('loading-txt').style.display = 'none';
-    });
+    .catch(err => alert('Error: ' + err.message))
+    .finally(() => els.loader.style.display = 'none');
 });
 
-// Play/pause: toggle; if no data and play, run first.
-btnPlay.addEventListener('click', () => {
-    if (!animData && !isPlaying) {  // No data: trigger run.
-        btnRun.click();
-        return;
+els.btns.play.addEventListener('click', () => {
+    if (!state.animData) return els.btns.run.click();
+    
+    // Resume logic: Calculate offset to maintain smooth animation
+    if (!state.isPlaying) {
+        const currentProg = state.frameIdx / (state.animData.positions.length - 1);
+        state.playStartTime = Date.now() - (currentProg * CONFIG.simDuration * 1000);
     }
-    isPlaying = !isPlaying;  // Toggle.
-    btnPlay.innerText = isPlaying ? "Pause" : "Play";  // Update text.
+    
+    state.isPlaying = !state.isPlaying;
+    els.btns.play.textContent = state.isPlaying ? 'Pause' : 'Play';
 });
 
-// Reset: rewind to 0, keep playing.
-btnReset.addEventListener('click', () => {
-    frameIdx = 0;  // Reset idx.
-    drawFrame();  // Redraw.
-    // No pause, matches reference comment.
+els.btns.reset.addEventListener('click', () => {
+    state.frameIdx = 0;
+    if (state.isPlaying) state.playStartTime = Date.now();
+    drawFrame();
+    drawGraph();
 });
 
-// Start empty loop.
-animate();  // Initial call.
+// Init
+resizeCanvases();
+generateFields();
+animate();

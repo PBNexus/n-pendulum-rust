@@ -1,77 +1,144 @@
-/* static/style.css */
-/* This stylesheet matches the reference exactly, with no changes. It provides responsive layout (flexbox), colors matching PyQt, mobile stacking (@media max-width 768px). */
-/* No additions for n; dynamic fields inherit form-row. body min-height:100vh for full scroll on mobile. */
-
+/* ==================== Global Reset & Layout ==================== */
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #f0f0f0;
     margin: 0;
     padding: 20px;
-    /* Changed to min-height so mobile can scroll instead of squeeze */
     min-height: 100vh;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
 }
 
-h1 { margin: 0 0 20px 0; font-size: 1.2rem; color: #333; }
+h1 {
+    margin: 0 0 20px 0;
+    font-size: 1.4rem;
+    color: #333;
+    text-align: center;
+}
 
 .main-container {
     display: flex;
     flex: 1;
     gap: 20px;
-    height: 100%;
+    height: 100%; /* Fills remaining vertical space */
+    overflow: hidden; /* Prevents double scrollbars */
 }
 
-/* --- Left Panel: Controls --- */
+/* ==================== Left Panel: Controls ==================== */
 .control-panel {
-    flex: 1;
-    min-width: 250px;
-    max-width: 300px;
+    width: 300px; /* Fixed width */
+    /* Force panel to fit within the viewport height */
+    height: calc(100vh - 40px); 
     background: white;
     padding: 20px;
     border-radius: 8px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     display: flex;
     flex-direction: column;
+    box-sizing: border-box; 
 }
 
+/* Flexbox Magic for Fieldset */
 fieldset {
     border: 1px solid #ddd;
     border-radius: 5px;
-    padding: 15px;
+    padding: 10px 15px;
     margin-bottom: 15px;
+    
+    /* These lines are crucial for scrolling to work: */
+    display: flex; 
+    flex-direction: column;
+    flex: 1;           /* Take up all available vertical space */
+    min-height: 0;     /* CRITICAL: Allows fieldset to shrink below content size */
+    overflow: hidden;  /* Prevents the box itself from expanding */
 }
 
-legend { font-weight: bold; color: #555; padding: 0 5px; }
+legend {
+    font-weight: bold;
+    color: #555;
+    padding: 0 5px;
+    flex-shrink: 0; /* Keep legend visible */
+}
 
 .form-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0; /* Keep the 'N' input visible at top */
 }
 
-label { font-size: 0.9rem; color: #333; }
-
-input[type="number"] {
-    width: 80px;
-    padding: 5px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
+/* ==================== Dynamic Parameter Grid ==================== */
+#params-fields {
+    flex: 1;           /* Fill the remaining space inside fieldset */
+    overflow-y: auto;  /* Enable scrolling ONLY here */
+    padding-right: 5px;
 }
 
-/* Buttons matching PyQt Colors */
-button {
-    width: 100%;
+/* Individual Pendulum Card */
+.param-group {
+    background-color: #f9f9f9;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
     padding: 10px;
     margin-bottom: 10px;
+}
+
+.param-group-title {
+    font-size: 0.85rem;
+    font-weight: bold;
+    color: #007bff;
+    margin-bottom: 6px;
+    display: block;
+}
+
+/* 3-Column Grid for Mass, Length, Angle */
+.param-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+}
+
+/* Tiny wrapper for input + label */
+.input-mini {
+    display: flex;
+    flex-direction: column;
+}
+
+.input-mini label {
+    font-size: 0.7rem;
+    color: #666;
+    margin-bottom: 2px;
+}
+
+.input-mini input {
+    width: 100%;
+    padding: 4px;
+    font-size: 0.85rem;
+    box-sizing: border-box;
+}
+
+/* ==================== Buttons ==================== */
+.button-group {
+    margin-top: auto; /* Pushes buttons to bottom of panel */
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     font-weight: bold;
     cursor: pointer;
     color: white;
     font-size: 0.95rem;
+    transition: background-color 0.2s;
 }
 
 #btn-run { background-color: #4CAF50; }
@@ -83,83 +150,99 @@ button {
 #btn-reset { background-color: #f44336; }
 #btn-reset:hover { background-color: #e53935; }
 
-button:disabled { background-color: #ccc !important; cursor: not-allowed; }
+.loading {
+    color: #666;
+    font-style: italic;
+    font-size: 0.9rem;
+    text-align: center;
+    margin-top: 10px;
+    display: none;
+}
 
-/* --- Right Panel: Plots --- */
+/* ==================== Right Panel: Plots ==================== */
 .canvas-area {
-    flex: 4;
+    flex: 1; /* Takes remaining width */
     display: flex;
     gap: 20px;
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    /* Removed white bg/padding here to let plots stand as cards */
 }
 
 .plot-box {
     flex: 1;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    border: 1px solid #eee;
+    overflow: hidden; /* Ensures canvas corners clip */
+    padding: 10px;
 }
 
 .plot-title {
-    margin: 10px 0;
+    margin: 0 0 10px 0;
     font-weight: bold;
     color: #444;
+    text-align: center;
 }
 
-/* Trajectory Image */
-#traj-img {
-    max-width: 100%;
-    max-height: 90%;
-    object-fit: contain;
-}
-
-/* HTML5 Canvas for Animation */
-#anim-canvas {
-    background-color: #fff;
+canvas {
     width: 100%;
     height: auto;
+    background-color: #fff;
     border: 1px solid #eee;
+    border-radius: 4px;
+    /* Ensure canvas aspect ratio holds */
+    aspect-ratio: 1 / 1; 
 }
 
-.loading { color: #666; font-style: italic; display: none;}
+/* ==================== Footer ==================== */
+.footer {
+    margin-top: 20px;
+    text-align: center;
+}
 
-/* --- MOBILE RESPONSIVENESS --- */
-/* This block triggers only on screens smaller than 768px (phones/tablets) */
+.footer a {
+    color: #666;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+.footer a:hover {
+    text-decoration: underline;
+    color: #333;
+}
+
+/* ==================== Mobile Responsiveness ==================== */
 @media (max-width: 768px) {
+    body {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+    }
+
     .main-container {
-        flex-direction: column; /* Stack Control Panel on top of Plots */
+        flex-direction: column;
+        height: auto;
+        overflow: visible;
     }
 
     .control-panel {
-        max-width: none; /* Let it take full width of the phone */
-        width: 100%;     /* Ensure it fills the container */
-        box-sizing: border-box; /* Prevent padding from breaking width */
+        flex: none;
+        width: 100%;
+        max-height: none; /* Allow full height on mobile */
+    }
+
+    #params-fields {
+        max-height: 300px; /* Limit scroll height on mobile */
     }
 
     .canvas-area {
-        flex-direction: column; /* Stack Trajectory Plot on top of Animation */
-        padding: 10px;          /* Reduce padding slightly for small screens */
+        flex-direction: column;
     }
     
     .plot-box {
-        width: 100%;            /* Force plots to take full width */
-        margin-bottom: 20px;    /* Add space between the stacked plots */
+        width: 100%;
+        margin-bottom: 20px;
     }
-
-    /* Ensure canvas and images don't overflow */
-    #anim-canvas, #traj-img {
-        max-width: 100%;
-    }
-}
-
-.github {
-    margin-top: 10px;
-    text-align: center;
-    font-size: 0.9rem;
-    font-weight: bold;
 }
